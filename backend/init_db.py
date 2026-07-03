@@ -16,9 +16,8 @@ def init_postgres():
         tables = ["users", "documents", "chunks", "queries", "audit_logs"]
         for table in tables:
             conn.execute(text(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;"))
-        
         conn.commit()
-    print("   -> RLS enabled. (Policies will be linked to JWTs in Level 3).")
+    print("   -> RLS enabled. (Strict policies will be linked to JWTs in Level 3).")
 
 def init_qdrant():
     print("3. Initializing Qdrant...")
