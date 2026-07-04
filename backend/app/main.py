@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.api.auth import router as auth_router
+from app.api.documents import router as documents_router
 
 # Initialize the FastAPI application
 app = FastAPI(title="Aegis-RAG Enterprise API")
@@ -14,3 +15,6 @@ def health_check():
 
 # Register the auth routes
 app.include_router(auth_router)
+
+# Register the documents routes
+app.include_router(documents_router)
