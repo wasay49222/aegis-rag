@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import func
 from datetime import datetime, timezone
 import uuid
 from .database import Base
@@ -34,14 +35,6 @@ class Chunk(Base):
     embedding_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=get_utc_now)
 
-class Query(Base):
-    __tablename__ = "queries"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
-    question = Column(String, nullable=False)
-    answer = Column(String, nullable=False)
-    created_at = Column(DateTime, default=get_utc_now)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -50,3 +43,13 @@ class AuditLog(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     details = Column(JSONB, nullable=True)
     created_at = Column(DateTime, default=get_utc_now)
+
+class Query(Base):
+    __tablename__ = "queries"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

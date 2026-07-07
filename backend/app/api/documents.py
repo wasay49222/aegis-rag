@@ -75,7 +75,7 @@ def upload_document(
     db.commit()
     db.refresh(new_doc)
 
-    # 7. Save Chunks to PostgreSQL AND Qdrant
+    # 7. Save Chunks to PostgreSQL AND prepare for Qdrant
     chunks_data = []
     for index, chunk_text in enumerate(chunks):
         # Save to PostgreSQL
@@ -86,9 +86,10 @@ def upload_document(
         )
         db.add(new_chunk)
         
-        # Prepare payload for Qdrant
+        # Prepare payload for Qdrant (CRITICAL: Must include user_id for security filtering)
         chunks_data.append({
             "document_id": str(new_doc.id),
+            "user_id": str(current_user.id),
             "chunk_index": index,
             "text": chunk_text
         })
