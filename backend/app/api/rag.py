@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import User, Query as QueryModel, AuditLog
 from app.api.auth import get_current_user
-from app.services.rag import RAGPipeline
+from app.services.agents.graph import MultiAgentGraph
 
 # Create the router
 router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -24,19 +24,34 @@ def ask_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    pipeline = RAGPipeline()
+    # 1. Initialize the Multi-Agent Graph
+    agent_graph = MultiAgentGraph()
+    compiled_graph = agent_graph.build_graph()
+
+    # 2. Define the initial state (the shared whiteboard for the agents)
+    initial_state = {
+        "query": question,
+        "user_id": str(current_user.id),
+        "document_id": document_id,
+        "context_chunks": [],
+        "answer": "",
+        "critique": "",
+        "retries": 0
+    }
 
     try:
-        # Attempt to retrieve chunks (This will trigger the Injection Guardrail)
-        context_chunks, retrieval_pii_log = pipeline.retrieve(
-            query=question,
-            user_id=str(current_user.id),
-            document_id=document_id,
-            top_k=3 
-        )
+        # 3. RUN THE GRAPH! 
+        # This triggers the Researcher, then the Critic, and loops if rejected.
+        final_state = compiled_graph.invoke(initial_state)
+        
+        # Extract the final results from the whiteboard
+        answer = final_state["answer"]
+        context_chunks = final_state["context_chunks"]
+        retries = final_state["retries"]
+
     except ValueError as e:
         if str(e) == "PROMPT_INJECTION_DETECTED":
-            # 1. LOG THE ATTACK to the Audit Database (SOC2 Compliance)
+            # Log the attack to the Audit Database
             new_audit = AuditLog(
                 event_type="PROMPT_INJECTION_BLOCKED",
                 user_id=current_user.id,
@@ -45,24 +60,17 @@ def ask_question(
             db.add(new_audit)
             db.commit()
 
-            # 2. Return a safe, generic refusal to the user
             return {
                 "answer": "Error: Your request was blocked by the security guardrails due to suspicious content.",
                 "sources": [],
                 "pii_redacted_count": 0,
-                "blocked": True
+                "blocked": True,
+                "agent_retries": 0
             }
-        # If it's a different ValueError, let it crash normally so we can debug
+        # If it's a different error, let it crash so we can debug
         raise e
 
-    if not context_chunks:
-        return {"answer": "I don't know. No relevant context was found.", "sources": [], "pii_redacted_count": 0}
-
-    # Generate the answer
-    answer, generation_pii_log = pipeline.generate_answer(question, context_chunks)
-    all_pii_logs = retrieval_pii_log + generation_pii_log
-
-    # Log the successful query
+    # 4. Log the successful query to PostgreSQL
     new_query = QueryModel(
         user_id=current_user.id,
         document_id=document_id,
@@ -72,9 +80,11 @@ def ask_question(
     db.add(new_query)
     db.commit()
 
+    # 5. Return the final answer and the debate stats
     return {
         "answer": answer,
         "sources": [chunk.get("text", "") for chunk in context_chunks],
-        "pii_redacted_count": len(all_pii_logs),
-        "blocked": False
+        "pii_redacted_count": 0,
+        "blocked": False,
+        "agent_retries": retries - 1 # Shows how many times the Critic rejected the answer
     }
