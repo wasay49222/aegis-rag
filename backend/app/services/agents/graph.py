@@ -3,6 +3,7 @@ from typing import TypedDict, List, Dict, Any
 from langgraph.graph import StateGraph, END
 
 from app.services.rag import RAGPipeline
+from app.services.evaluation import RAGEvaluator
 
 # 1. Define the "Memory" (State) of our Graph
 class AgentState(TypedDict):
@@ -18,6 +19,7 @@ class MultiAgentGraph:
     def __init__(self):
         # We reuse our existing, secure RAG pipeline for the heavy lifting
         self.pipeline = RAGPipeline()
+        self.evaluator = RAGEvaluator() # The mathematical judge
         self.max_retries = 2
         
     def research_node(self, state: AgentState):
@@ -41,33 +43,32 @@ class MultiAgentGraph:
         }
 
     def critic_node(self, state: AgentState):
-        """The Critic Agent: Checks if the answer is actually supported by the context."""
-        print("[CRITIC] Reviewing the Researcher's answer for hallucinations...")
+        """The Critic Agent: Uses Ragas metrics to objectively verify faithfulness."""
+        print("[CRITIC] Evaluating answer using Ragas metrics...")
         
-        # Combine context into a single string for the prompt
-        context_text = "\n".join([c.get("text", "") for c in state["context_chunks"]])
+        # Extract the raw text from the context chunks
+        contexts = [c.get("text", "") for c in state["context_chunks"]]
         
-        # The Critic's Prompt
-        critique_prompt = f"""You are a strict fact-checker. 
-Given the Context and the Answer, does the Answer contain any information NOT found in the Context?
-If it is perfectly factual, reply with exactly: APPROVED
-If it contains hallucinations or outside info, reply with exactly: REJECTED
-
-Context: {context_text}
-Answer: {state["answer"]}
-
-Verdict:"""
-
-        # Call the local Ollama API to act as the Critic
-        payload = {
-            "model": "llama3.2:1b",
-            "prompt": critique_prompt,
-            "stream": False,
-            "options": {"num_predict": 10} # We only need a single word response
-        }
-        response = httpx.post("http://localhost:11434/api/generate", json=payload, timeout=60.0)
-        verdict = response.json().get("response", "").strip().upper()
+        # Run the mathematical evaluation
+        scores = self.evaluator.evaluate(
+            query=state["query"],
+            answer=state["answer"],
+            contexts=contexts
+        )
         
+        faithfulness_score = scores.get("faithfulness", 0.0)
+        relevancy_score = scores.get("answer_relevancy", 0.0)
+        
+        print(f"[CRITIC] Ragas Scores -> Faithfulness: {faithfulness_score:.2f}, Relevancy: {relevancy_score:.2f}")
+        
+        # Enterprise Thresholds
+        # Faithfulness must be > 0.8 (80% of the answer must be grounded in context)
+        # Relevancy must be > 0.7 (The answer must actually address the prompt)
+        if faithfulness_score >= 0.8 and relevancy_score >= 0.7:
+            verdict = "APPROVED"
+        else:
+            verdict = "REJECTED"
+            
         print(f"[CRITIC] Verdict: {verdict}")
         
         return {"critique": verdict}
