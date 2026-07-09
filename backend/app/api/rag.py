@@ -24,41 +24,39 @@ def ask_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Takes a question, retrieves context from Qdrant, generates an answer via Llama 3,
-    and logs the interaction for compliance.
-    """
-    # 1. Initialize the pipeline (The Brain)
+    # 1. Initialize the pipeline
     pipeline = RAGPipeline()
 
-    # 2. Retrieve relevant chunks
-    context_chunks = pipeline.retrieve(
+    # 2. Retrieve relevant chunks (Now returns chunks AND an audit log)
+    context_chunks, retrieval_pii_log = pipeline.retrieve(
         query=question,
         user_id=str(current_user.id),
         document_id=document_id,
-        top_k=3 # We only need the top 3 most relevant chunks
+        top_k=3 
     )
 
-    # If no context is found, return immediately
     if not context_chunks:
-        return {"answer": "I don't know. No relevant context was found.", "sources": []}
+        return {"answer": "I don't know. No relevant context was found.", "sources": [], "pii_redacted": []}
 
-    # 3. Generate the answer using Llama 3
-    answer = pipeline.generate_answer(question, context_chunks)
+    # 3. Generate the answer (Now returns answer AND an audit log)
+    answer, generation_pii_log = pipeline.generate_answer(question, context_chunks)
 
-    # 4. Log to PostgreSQL (Audit Trail for Compliance)
-    # Note: We use 'QueryModel' because 'Query' is already used by FastAPI above
+    # 4. Combine all PII logs for the database
+    all_pii_logs = retrieval_pii_log + generation_pii_log
+
+    # 5. Log to PostgreSQL (Audit Trail)
     new_query = QueryModel(
         user_id=current_user.id,
         document_id=document_id,
-        question=question,
-        answer=answer
+        question=question, # Log the ORIGINAL question for the audit
+        answer=answer      # Log the SANITIZED answer
     )
     db.add(new_query)
     db.commit()
 
-    # 5. Return the answer and the source text used to generate it
+    # 6. Return the sanitized answer and sources
     return {
         "answer": answer,
-        "sources": [chunk.get("text", "") for chunk in context_chunks]
+        "sources": [chunk.get("text", "") for chunk in context_chunks],
+        "pii_redacted_count": len(all_pii_logs) # Show the frontend how much PII was blocked
     }
