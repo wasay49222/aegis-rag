@@ -4,13 +4,15 @@ from typing import List, Dict, Any, Tuple
 from app.services.embedder import Embedder
 from app.services.vector_store import VectorStore
 from app.services.pii_guardrail import PIIGuardrail
+from app.services.injection_guardrail import InjectionGuardrail
 
 class RAGPipeline:
     def __init__(self):
         # Initialize our existing services
         self.embedder = Embedder()
         self.vector_store = VectorStore()
-        self.guardrail = PIIGuardrail() # Initialize the security shield
+        self.guardrail = PIIGuardrail() # The PII shield
+        self.injection_guard = InjectionGuardrail() # The anti-hacking shield
         
         # Ollama local API configuration
         self.ollama_url = "http://localhost:11434/api/generate"
@@ -18,11 +20,17 @@ class RAGPipeline:
 
     def retrieve(self, query: str, user_id: str, document_id: str = None, top_k: int = 5) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
         """
-        1. Sanitizes the query for PII.
-        2. Embeds the clean query.
-        3. Searches Qdrant.
+        1. Checks for Prompt Injection (Blocks immediately if malicious).
+        2. Sanitizes the query for PII.
+        3. Embeds the clean query.
+        4. Searches Qdrant.
         """
-        # SECURITY: Redact PII before processing
+        # SECURITY LAYER 1: Check for Prompt Injection
+        if not self.injection_guard.is_safe(query):
+            # We raise a specific error so the API knows it was an injection
+            raise ValueError("PROMPT_INJECTION_DETECTED")
+        
+        # SECURITY LAYER 2: Redact PII
         clean_query, pii_audit_log = self.guardrail.redact(query)
         
         print(f"[GUARDRAIL] Original Query: {query}")
