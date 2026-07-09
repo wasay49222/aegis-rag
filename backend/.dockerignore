@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv
+.git
+.gitignore
+.dockerignore
+docker-compose.yml
+Dockerfile
+reports/
+uploads/
+debug_qdrant.py

@@ -1,3 +1,4 @@
+import os
 import httpx
 from typing import List, Dict, Any, Tuple
 
@@ -15,7 +16,7 @@ class RAGPipeline:
         self.injection_guard = InjectionGuardrail() # The anti-hacking shield
         
         # Ollama local API configuration
-        self.ollama_url = "http://localhost:11434/api/generate"
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
         self.model_name = "llama3.2:1b"
 
     def retrieve(self, query: str, user_id: str, document_id: str = None, top_k: int = 5) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:

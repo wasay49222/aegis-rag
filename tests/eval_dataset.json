@@ -1,0 +1,14 @@
+[
+    {
+        "query": "What is the tech stack used in Aegis-RAG?",
+        "ground_truth": "FastAPI, LangGraph, Qdrant, NeMo Guardrails, Ragas, and Next.js."
+    },
+    {
+        "query": "How does Aegis-RAG prevent data leakage?",
+        "ground_truth": "By wrapping every LLM interaction in a security guardrail layer that performs PII redaction and prompt injection detection."
+    },
+    {
+        "query": "What happens if the Critic Agent detects a hallucination?",
+        "ground_truth": "The system either regenerates the answer or returns a safe fallback stating it cannot confidently answer."
+    }
+]

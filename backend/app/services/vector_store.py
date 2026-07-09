@@ -1,3 +1,4 @@
+import os
 import uuid
 from typing import List, Dict, Any
 
@@ -8,7 +9,8 @@ from qdrant_client.http.models import Distance, VectorParams, PointStruct
 class VectorStore:
     def __init__(self):
         # Connect to the local Qdrant Docker container
-        self.client = QdrantClient(host="localhost", port=6333)
+        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.client = QdrantClient(host=qdrant_host, port=6333)
         self.collection_name = "aegis_documents"
         self.vector_size = 384 # Must match the embedder output
 
