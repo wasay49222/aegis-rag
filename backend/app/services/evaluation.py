@@ -5,23 +5,33 @@ from langchain_community.llms import Ollama
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
+import threading
 
 class RAGEvaluator:
-    def __init__(self):
-        print("[RAGAS] Initializing local evaluator models...")
-        # Wrap local models so Ragas can use them as the objective "Judge"
-        # We set temperature to 0 for consistent, deterministic grading
-        self.llm = LangchainLLMWrapper(Ollama(model="llama3.2:1b", temperature=0))
-        self.embeddings = LangchainEmbeddingsWrapper(
-            HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        )
-        print("[RAGAS] Evaluator initialized.")
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(RAGEvaluator, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
+    def _initialize(self):
+        if not self._initialized:
+            print("[RAGAS] Initializing local evaluator models (this takes time, but only happens once)...")
+            # Use host.docker.internal to reach Ollama on the host machine
+            self.llm = LangchainLLMWrapper(Ollama(base_url="http://host.docker.internal:11434", model="llama3.2:1b", temperature=0))
+            self.embeddings = LangchainEmbeddingsWrapper(
+                HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+            )
+            self._initialized = True
+            print("[RAGAS] Evaluator initialized and ready.")
 
     def evaluate(self, query: str, answer: str, contexts: list) -> dict:
-        """
-        Computes Ragas metrics to objectively score the RAG output.
-        """
-        # Ragas requires data in a HuggingFace Dataset format
+        self._initialize()
+        
         data = {
             "question": [query],
             "answer": [answer],
@@ -30,19 +40,17 @@ class RAGEvaluator:
         dataset = Dataset.from_dict(data)
 
         try:
-            # Run the mathematical evaluation
             result = evaluate(
                 dataset=dataset,
                 metrics=[faithfulness, answer_relevancy],
                 llm=self.llm,
                 embeddings=self.embeddings,
             )
-            # Convert to standard Python floats to prevent JSON serialization errors later
             return {
                 "faithfulness": float(result["faithfulness"]),
                 "answer_relevancy": float(result["answer_relevancy"])
             }
         except Exception as e:
             print(f"[RAGAS ERROR] Evaluation failed: {e}")
-            # Fallback: If Ragas crashes, we pass the answer so the pipeline doesn't break
-            return {"faithfulness": 1.0, "answer_relevancy": 1.0}
+            return {"faithfulness": 0.0, "answer_relevancy": 0.0}
+        

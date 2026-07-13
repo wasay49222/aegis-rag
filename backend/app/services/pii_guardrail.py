@@ -1,63 +1,69 @@
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
-from presidio_anonymizer.entities import OperatorConfig
-from typing import Tuple, List, Dict
+from typing import List, Tuple, Dict
 
 class PIIGuardrail:
     def __init__(self):
-        """
-        Initialize the Presidio Analyzer (detects PII) and Anonymizer (masks PII).
-        These engines are heavy, so we initialize them once globally.
-        """
+        # Initialize the Presidio engines
         self.analyzer = AnalyzerEngine()
         self.anonymizer = AnonymizerEngine()
         
-        # Define how we want to mask different types of PII
-        self.operators = {
-            "PERSON": OperatorConfig("replace", {"new_value": "<PERSON>"}),
-            "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "<EMAIL>"}),
-            "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "<PHONE>"}),
-            "CREDIT_CARD": OperatorConfig("replace", {"new_value": "<CREDIT_CARD>"}),
-            "US_SSN": OperatorConfig("replace", {"new_value": "<SSN>"}),
-            "DEFAULT": OperatorConfig("replace", {"new_value": "<REDACTED>"})
+        # Technical terms that should NOT be flagged as PII
+        self.tech_whitelist = {
+            "Ragas", "LangGraph", "Qdrant", "NeMo", "FastAPI", 
+            "Next.js", "PostgreSQL", "Redis", "LangChain", "PyMuPDF",
+            "Presidio", "Ollama", "Llama", "Docker", "GitHub"
         }
+        
+        print("[SECURITY] PII Guardrail initialized with tech whitelist.")
 
     def redact(self, text: str) -> Tuple[str, List[Dict[str, str]]]:
         """
-        Scans text for PII, replaces it with tags, and returns the clean text 
-        along with an audit log of what was found.
-        
-        Returns:
-            Tuple of (redacted_text, list_of_detected_pii_types)
+        Analyzes text for PII, redacts it, and returns an audit log.
         """
-        if not text.strip():
+        if not text or not text.strip():
             return text, []
 
-        # 1. Analyze the text to find PII entities
+        # Step 1: Analyze the text for PII entities
         analyzer_results = self.analyzer.analyze(
             text=text,
-            language="en",
-            entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "US_SSN"]
+            language='en',
+            score_threshold=0.5
         )
-        
-        # If no PII is found, return the original text immediately to save compute
-        if not analyzer_results:
+
+        # Step 2: Filter out false positives (tech terms in the whitelist)
+        filtered_results = []
+        for result in analyzer_results:
+            entity_text = text[result.start:result.end]
+            
+            # Skip if this entity is a known technical term
+            if entity_text in self.tech_whitelist:
+                print(f"[GUARDRAIL] Whitelisted tech term ignored: {entity_text}")
+                continue
+            
+            # Otherwise, keep it for redaction
+            filtered_results.append(result)
+
+        # Step 3: If no PII found after filtering, return original text
+        if not filtered_results:
             return text, []
 
-        # 2. Anonymize (mask) the detected PII
-        anonymizer_result = self.anonymizer.anonymize(
+        # Step 4: Anonymize the text
+        anonymized_result = self.anonymizer.anonymize(
             text=text,
-            analyzer_results=analyzer_results,
-            operators=self.operators
+            analyzer_results=filtered_results
         )
-        
-        # 3. Build an audit log for compliance (SOC2/HIPAA)
+
+        # Step 5: Build the audit log
         audit_log = []
-        for entity in analyzer_results:
+        for result in filtered_results:
+            entity_text = text[result.start:result.end]
             audit_log.append({
-                "entity_type": entity.entity_type,
-                "start_index": entity.start,
-                "end_index": entity.end
+                "entity_type": result.entity_type,
+                "original_text": entity_text,
+                "start": result.start,
+                "end": result.end,
+                "score": result.score
             })
-            
-        return anonymizer_result.text, audit_log
+
+        return anonymized_result.text, audit_log

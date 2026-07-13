@@ -1,21 +1,33 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+import threading
 
 from app.database import SessionLocal
 from app.models import User, Query as QueryModel, AuditLog
 from app.api.auth import get_current_user
 from app.services.agents.graph import MultiAgentGraph
+from app.services.evaluation import RAGEvaluator
 
-# Create the router
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
-# Helper to get the database session
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+def run_background_ragas_evaluation(query: str, answer: str, contexts: list):
+    """
+    This runs in a completely separate thread AFTER the user gets their response.
+    """
+    print("[BACKGROUND THREAD] Starting deep Ragas evaluation...")
+    try:
+        evaluator = RAGEvaluator()
+        scores = evaluator.evaluate(query=query, answer=answer, contexts=contexts)
+        print(f"[BACKGROUND THREAD] Ragas Scores -> Faithfulness: {scores.get('faithfulness')}, Relevancy: {scores.get('answer_relevancy')}")
+    except Exception as e:
+        print(f"[BACKGROUND THREAD] Ragas evaluation failed: {e}")
 
 @router.post("/query")
 def ask_question(
@@ -24,11 +36,9 @@ def ask_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. Initialize the Multi-Agent Graph
     agent_graph = MultiAgentGraph()
     compiled_graph = agent_graph.build_graph()
 
-    # 2. Define the initial state (the shared whiteboard for the agents)
     initial_state = {
         "query": question,
         "user_id": str(current_user.id),
@@ -40,18 +50,14 @@ def ask_question(
     }
 
     try:
-        # 3. RUN THE GRAPH! 
-        # This triggers the Researcher, then the Critic, and loops if rejected.
         final_state = compiled_graph.invoke(initial_state)
         
-        # Extract the final results from the whiteboard
         answer = final_state["answer"]
         context_chunks = final_state["context_chunks"]
         retries = final_state["retries"]
 
     except ValueError as e:
         if str(e) == "PROMPT_INJECTION_DETECTED":
-            # Log the attack to the Audit Database
             new_audit = AuditLog(
                 event_type="PROMPT_INJECTION_BLOCKED",
                 user_id=current_user.id,
@@ -67,10 +73,16 @@ def ask_question(
                 "blocked": True,
                 "agent_retries": 0
             }
-        # If it's a different error, let it crash so we can debug
         raise e
 
-    # 4. Log the successful query to PostgreSQL
+    # Start the heavy evaluation in a background thread (Non-blocking)
+    thread = threading.Thread(
+        target=run_background_ragas_evaluation, 
+        args=(question, answer, [c.get("text", "") for c in context_chunks])
+    )
+    thread.start()
+
+    # Log the successful query to PostgreSQL
     new_query = QueryModel(
         user_id=current_user.id,
         document_id=document_id,
@@ -80,11 +92,11 @@ def ask_question(
     db.add(new_query)
     db.commit()
 
-    # 5. Return the final answer and the debate stats
+    # Return the answer IMMEDIATELY to the user
     return {
         "answer": answer,
         "sources": [chunk.get("text", "") for chunk in context_chunks],
         "pii_redacted_count": 0,
         "blocked": False,
-        "agent_retries": retries - 1 # Shows how many times the Critic rejected the answer
+        "agent_retries": retries - 1
     }
