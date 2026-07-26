@@ -176,7 +176,7 @@ Aegis-RAG uses Ragas to ensure high-quality responses. Default baselines:
 | 12 | Docker Containerization | ✅ |
 | 13 | CI/CD Pipeline (GitHub Actions) | ✅ |
 | 14 | Next.js Frontend & UI | ✅ |
-| 15 | Monitoring, Logging & Deployment | 🔄 |
+| 15 | Monitoring, Logging & Deployment | ✅ |
 
 ---
 
@@ -197,6 +197,12 @@ BS AI Student, Information Technology University (ITU), Lahore
 Building enterprise-grade, secure AI systems.
 
 🔗 [LinkedIn](https://www.linkedin.com/in/syed-muhammad-wasay-119682289) | 📧 [Wasay49222@gmail.com](mailto:Wasay49222@gmail.com)
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
