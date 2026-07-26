@@ -1,69 +1,39 @@
-from presidio_analyzer import AnalyzerEngine
+# backend/app/services/pii_guardrail.py
+from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
+from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
-from typing import List, Tuple, Dict
 
 class PIIGuardrail:
     def __init__(self):
-        # Initialize the Presidio engines
-        self.analyzer = AnalyzerEngine()
-        self.anonymizer = AnonymizerEngine()
-        
-        # Technical terms that should NOT be flagged as PII
-        self.tech_whitelist = {
-            "Ragas", "LangGraph", "Qdrant", "NeMo", "FastAPI", 
-            "Next.js", "PostgreSQL", "Redis", "LangChain", "PyMuPDF",
-            "Presidio", "Ollama", "Llama", "Docker", "GitHub"
+        # Force Presidio to use the lightweight 'sm' Spacy model to save RAM
+        configuration = {
+            "nlp_engine_name": "spacy",
+            "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
         }
+        provider = NlpEngineProvider(nlp_configuration=configuration)
+        nlp_engine = provider.create_engine()
         
-        print("[SECURITY] PII Guardrail initialized with tech whitelist.")
+        self.analyzer = AnalyzerEngine(nlp_engine=nlp_engine, registry=RecognizerRegistry())
+        self.anonymizer = AnonymizerEngine()
 
-    def redact(self, text: str) -> Tuple[str, List[Dict[str, str]]]:
-        """
-        Analyzes text for PII, redacts it, and returns an audit log.
-        """
-        if not text or not text.strip():
+    def redact(self, text: str) -> tuple:
+        if not text:
             return text, []
-
-        # Step 1: Analyze the text for PII entities
-        analyzer_results = self.analyzer.analyze(
-            text=text,
-            language='en',
-            score_threshold=0.5
-        )
-
-        # Step 2: Filter out false positives (tech terms in the whitelist)
-        filtered_results = []
-        for result in analyzer_results:
-            entity_text = text[result.start:result.end]
             
-            # Skip if this entity is a known technical term
-            if entity_text in self.tech_whitelist:
-                print(f"[GUARDRAIL] Whitelisted tech term ignored: {entity_text}")
-                continue
-            
-            # Otherwise, keep it for redaction
-            filtered_results.append(result)
-
-        # Step 3: If no PII found after filtering, return original text
-        if not filtered_results:
-            return text, []
-
-        # Step 4: Anonymize the text
-        anonymized_result = self.anonymizer.anonymize(
-            text=text,
-            analyzer_results=filtered_results
+        # Analyze for common PII
+        results = self.analyzer.analyze(
+            text=text, 
+            language='en', 
+            entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "US_SSN", "IP_ADDRESS"]
         )
-
-        # Step 5: Build the audit log
-        audit_log = []
-        for result in filtered_results:
-            entity_text = text[result.start:result.end]
-            audit_log.append({
-                "entity_type": result.entity_type,
-                "original_text": entity_text,
-                "start": result.start,
-                "end": result.end,
-                "score": result.score
-            })
-
-        return anonymized_result.text, audit_log
+        
+        # Anonymize the text (replaces PII with <ENTITY_TYPE>)
+        anonymized_result = self.anonymizer.anonymize(text=text, analyzer_results=results)
+        
+        # Extract what was redacted for audit logging using start/end indices
+        redacted_entities = [
+            {"entity": r.entity_type, "value": text[r.start:r.end]} 
+            for r in results
+        ]
+        
+        return anonymized_result.text, redacted_entities

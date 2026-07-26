@@ -21,8 +21,8 @@ class RAGEvaluator:
     def _initialize(self):
         if not self._initialized:
             print("[RAGAS] Initializing local evaluator models (this takes time, but only happens once)...")
-            # Use host.docker.internal to reach Ollama on the host machine
-            self.llm = LangchainLLMWrapper(Ollama(base_url="http://host.docker.internal:11434", model="llama3.2:1b", temperature=0))
+            # CHANGED: Use localhost instead of host.docker.internal for local development
+            self.llm = LangchainLLMWrapper(Ollama(base_url="http://localhost:11434", model="llama3.2:1b", temperature=0))
             self.embeddings = LangchainEmbeddingsWrapper(
                 HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             )
@@ -53,4 +53,3 @@ class RAGEvaluator:
         except Exception as e:
             print(f"[RAGAS ERROR] Evaluation failed: {e}")
             return {"faithfulness": 0.0, "answer_relevancy": 0.0}
-        
